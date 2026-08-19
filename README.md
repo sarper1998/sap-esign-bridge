@@ -1,121 +1,109 @@
-# SignBridge — SAP × E‑İmza
+# SignBridge Gateway
 
-SAP onay süreçleri ile güvenli e‑imza sağlayıcıları arasında çalışan, olay tabanlı bir entegrasyon köprüsü. SAP tarafında bir onay `APPROVED` olduğunda imza talebi otomatik açılır; kullanıcı imzasını güvenli sağlayıcıda tamamladıktan sonra imzalı belge, durum ve denetim izi SAP’ye geri işlenir.
+**SAP onaylarını, kurumun seçtiği e‑imza sağlayıcısına bağlayan self-hosted orkestrasyon katmanı.**
 
-> Bu proje çalışan bir entegrasyon MVP’si ve demo arayüzüdür. Nitelikli elektronik imza üretmez; özel anahtar/PIN saklamaz. Gerçek imza, yetkili e‑imza sağlayıcısının güvenli aracı üzerinde kullanıcı iradesiyle oluşturulmalıdır.
+SignBridge bir imza uygulaması veya sertifika sağlayıcısı değildir. SAP’ten gelen onay olayını doğrular, belge ve şirket politikasını uygular, kullanıcıyı yapılandırılmış imza sağlayıcısına yönlendirir ve imzalı sonucu denetim iziyle SAP’ye geri işler. Özel anahtar ve PIN gateway'e girmez.
 
-## Neler hazır?
+![SignBridge yönetim konsolu](docs/linkedin-article-cover.png)
 
-- SAP webhook’u için SHA‑256 HMAC doğrulaması
-- Aynı onayın iki kez imzaya gitmesini önleyen `eventId` idempotency kontrolü
-- Değiştirilebilir imza sağlayıcı adaptörü (`demo`, `documenso`)
-- Documenso v2 `envelope/create` + `envelope/distribute` entegrasyonu
-- Documenso `DOCUMENT_COMPLETED` webhook’u ve sabit zamanlı secret karşılaştırması
-- İmza tamamlanınca SAP’ye geri bildirim
-- Süreç başına okunabilir denetim izi
-- SSRF’e karşı belge sunucusu izin listesi
-- Bağımlılıksız Node.js sunucusu, mobil uyumlu demo paneli ve testler
+## Ürün yüzeyi
 
-## Akış
+- SAP S/4HANA Cloud veya on-prem kaynak sistem
+- Event Mesh / Integration Suite üzerinden asenkron olay alımı
+- HMAC doğrulama ve `eventId` tabanlı idempotency
+- Belge türü + şirket kodu tabanlı imza politikaları
+- Documenso adaptörü ve yeni sağlayıcılar için adaptör arayüzü
+- PostgreSQL üzerinde kalıcı iş, retry ve audit kaydı
+- SAP geri bildirim hataları için yeniden deneme uç noktası
+- Yönetim konsolu, health ve readiness kontrolleri
+- Docker Compose ile kurum içinde kurulum
 
-```mermaid
-sequenceDiagram
-  participant SAP as SAP S/4HANA
-  participant SB as SignBridge
-  participant ESP as E-İmza Sağlayıcısı
-  participant U as İmza Sahibi
-
-  SAP->>SB: APPROVED webhook + HMAC
-  SB->>SB: HMAC, şema, eventId, SHA-256 kontrolü
-  SB->>ESP: İmza talebi + PDF + imzacı
-  ESP-->>U: Güvenli imza oturumu
-  U->>ESP: Kimlik doğrulama / PIN / onay
-  ESP->>SB: DOCUMENT_COMPLETED webhook
-  SB->>SAP: SIGNED + belge referansı + denetim izi
-```
-
-## Hızlı başlatma
-
-Node.js 20+ yeterlidir; harici paket kurulumu yoktur.
-
-```powershell
-Copy-Item .env.example .env
-node src/server.js
-```
-
-Arayüz: `http://localhost:8787`
-
-Testler:
-
-```powershell
-node --test
-```
-
-## SAP webhook sözleşmesi
-
-`POST /api/webhooks/sap/approval`
-
-```json
-{
-  "eventId": "sap-event-2026-00091",
-  "approvalId": "APR-700191",
-  "system": "SAP S/4HANA Cloud",
-  "status": "APPROVED",
-  "approvedAt": "2026-08-20T08:30:00Z",
-  "document": {
-    "id": "PO-45000931",
-    "title": "Yatırım Harcama Onayı",
-    "hash": "sha256:cf71351b12b7e6e4782892d5f6d0e0c1bb0237a47f867f61de2d1e0899a100cd",
-    "url": "https://documents.example.com/sap/PO-45000931.pdf"
-  },
-  "signer": {
-    "name": "Selin Aras",
-    "email": "selin.aras@example.com",
-    "department": "Finans"
-  }
-}
-```
-
-Header:
+## Mimari
 
 ```text
-X-SAP-Signature: sha256=<HMAC_SHA256(raw_body, SAP_WEBHOOK_SECRET)>
+SAP S/4HANA
+    │ Business Event / approval exit
+    ▼
+SAP Event Mesh → Integration Suite iFlow
+    │ HTTPS + HMAC
+    ▼
+SignBridge Gateway ─── PostgreSQL
+    │ provider adapter
+    ▼
+E‑İmza sağlayıcısı
+    │ completion webhook
+    ▼
+SignBridge → SAP OData/HTTP → DMS / iş nesnesi / audit
 ```
 
-Ayrıntılar: [docs/SAP_INTEGRATION.md](docs/SAP_INTEGRATION.md)
+## Beş dakikalık yerel başlangıç
 
-## Documenso’ya bağlama
+Demo, harici bağımlılık olmadan çalışır:
 
-1. `.env` içinde `SIGNATURE_PROVIDER=documenso` yapın.
-2. `DOCUMENSO_API_URL`, `DOCUMENSO_API_KEY` ve `DOCUMENSO_WEBHOOK_SECRET` değerlerini girin.
-3. SAP PDF sunucusunu `DOCUMENT_HOST_ALLOWLIST` listesine ekleyin.
-4. Documenso takım ayarlarında webhook URL’sini `https://<bridge>/api/webhooks/documenso` olarak tanımlayın.
-5. Yalnızca gerekli olayları, özellikle `DOCUMENT_COMPLETED`, seçin.
+```bash
+pnpm install
+cp .env.example .env
+pnpm start
+```
 
-Documenso kişisel hesaplarında webhook kullanılamayabilir; takım özelliği gerekir. Üretim öncesinde kullandığınız sürümü güvenlik danışmanları ve lisans koşulları açısından ayrıca değerlendirin.
+Ardından `http://localhost:8787` adresini açın. Kalıcı kurulum:
 
-## Üretim kontrol listesi
+```bash
+cp .env.example .env
+# .env içindeki secret ve URL değerlerini değiştirin
+export POSTGRES_PASSWORD='uzun-rastgele-bir-parola'
+docker compose up -d --build
+curl --fail http://127.0.0.1:8787/api/ready
+```
 
-- HTTPS/mTLS veya SAP BTP Destination kullanın.
-- Secret değerlerini Vault/KMS’de tutun ve düzenli döndürün.
-- Demo içi bellek deposunu PostgreSQL/HANA tabanlı dayanıklı bir outbox/idempotency tablosuyla değiştirin.
-- PDF URL’lerini kısa ömürlü, tek kullanımlık ve host allowlist ile sınırlı yapın.
-- Kuyruk, retry/backoff ve dead-letter queue ekleyin.
-- İmzalı belgeyi indirdikten sonra PAdES/XAdES validasyonu, sertifika zinciri, OCSP/CRL ve zaman damgası kontrolü yapın.
-- Kişisel nitelikli e‑imza için kullanıcı iradesini/PIN adımını atlamayın. Tam otomasyon gereken senaryolarda kişisel imza yerine mevzuata uygun kurumsal elektronik mühür/HSM politikasını hukuk ve güvenlik ekipleriyle değerlendirin.
+Reverse proxy üzerinde TLS sonlandırın; `8787` portunu internete doğrudan açmayın.
 
-## Açık kaynak altyapı seçenekleri
+## SAP kurulumu
 
-Karşılaştırma ve önerilen rol dağılımı: [docs/GITHUB_E_SIGNATURE_OPTIONS.md](docs/GITHUB_E_SIGNATURE_OPTIONS.md)
+S/4HANA Cloud, on-prem ve geri dönüş akışlarını kapsayan adım adım rehber:
 
-- [Documenso](https://github.com/documenso/documenso) — self-hosted belge imzalama iş akışı ve API
-- [LibreSign](https://github.com/LibreSign/libresign) — Nextcloud tabanlı kontrollü imza süreçleri
-- [EU DSS](https://github.com/esig/dss) — PAdES/XAdES/CAdES/JAdES üretim, genişletme ve doğrulama kütüphanesi
+**[SAP Kurulum Tutorialı](docs/SAP_INSTALLATION_TUTORIAL_TR.md)**
 
-## LinkedIn paylaşımı
+Kısa entegrasyon sözleşmesi ve örnek payload için [SAP entegrasyon notlarına](docs/SAP_INTEGRATION.md), uç noktalar için [OpenAPI tanımına](openapi.yaml) bakın.
 
-Hazır metin: [docs/LINKEDIN_POST_TR.md](docs/LINKEDIN_POST_TR.md)
+## Temel ortam değişkenleri
+
+| Değişken | Açıklama |
+|---|---|
+| `DATABASE_URL` | PostgreSQL bağlantı dizesi; boşsa yalnızca demo memory store kullanılır |
+| `SAP_WEBHOOK_SECRET` | SAP/iFlow ile paylaşılan HMAC secret |
+| `SAP_UPDATE_URL` | İmza tamamlandığında çağrılacak SAP/iFlow endpoint'i |
+| `SIGNATURE_PROVIDER` | `demo` veya `documenso` |
+| `DOCUMENT_HOST_ALLOWLIST` | PDF indirilebilecek SAP/DMS hostları |
+| `ADMIN_TOKEN` | Operasyonel write endpoint'leri için bearer token |
+| `SEED_DEMO` | Production'da `false` olmalı |
+
+Tüm seçenekler için [.env.example](.env.example) dosyasını kullanın.
+
+## API akışı
+
+```bash
+BODY='{"eventId":"evt-100","approvalId":"APR-100","companyCode":"1000","status":"APPROVED","document":{"id":"DOC-100","title":"Tedarikçi Sözleşmesi","type":"CONTRACT","hash":"sha256:...","url":"https://sap.example.com/DOC-100.pdf"},"signer":{"name":"Ali Özer","email":"ali@example.com","department":"Hukuk"}}'
+SIGNATURE="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SAP_WEBHOOK_SECRET" -hex | sed 's/^.* //')"
+curl -X POST http://localhost:8787/api/webhooks/sap/approval \
+  -H 'Content-Type: application/json' \
+  -H "X-SAP-Signature: $SIGNATURE" \
+  --data "$BODY"
+```
+
+## Güvenlik sınırı
+
+Production kurulumu için en azından TLS, secret manager, outbound allowlist, PostgreSQL yedekleme, merkezi log/SIEM ve sağlayıcı webhook doğrulaması kullanın. Nitelikli e‑imza mevzuatı ve sağlayıcı seçimi ülkeye ve belge türüne göre değerlendirilmelidir; bu repo hukuki uygunluk garantisi vermez.
+
+## Geliştirme
+
+```bash
+pnpm check
+docker build -t signbridge-gateway:local .
+```
+
+Yeni sağlayıcı, `createSignatureRequest(job)` metodunu uygulayan bir adaptör olarak `src/providers` altına eklenir. İş akışının geri kalanı sağlayıcıdan bağımsızdır.
 
 ## Lisans
 
-SignBridge örnek kodu MIT lisanslıdır. Entegre edeceğiniz üçüncü taraf projelerin (ör. AGPL/LGPL) lisanslarını ayrıca inceleyin.
+MIT. SAP, SAP SE’nin; diğer ürün adları ilgili sahiplerinin ticari markalarıdır. Bu proje SAP tarafından desteklenen/resmî bir ürün değildir.

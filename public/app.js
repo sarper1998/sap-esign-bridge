@@ -22,6 +22,11 @@ const elements = {
   consent: document.querySelector('#consentCheck'),
   complete: document.querySelector('#completeButton'),
   toast: document.querySelector('#toast'),
+  gatewayName: document.querySelector('#gatewayName'),
+  sapSystem: document.querySelector('#sapSystem'),
+  providerName: document.querySelector('#providerName'),
+  databaseMode: document.querySelector('#databaseMode'),
+  policies: document.querySelector('#policyList'),
 };
 
 const statusMap = {
@@ -36,6 +41,7 @@ const statusMap = {
 
 const eventIcons = {
   SAP_APPROVAL_RECEIVED: 'S',
+  POLICY_MATCHED: 'P',
   SIGNATURE_REQUESTED: '↗',
   SIGNATURE_COMPLETED: '✓',
   DOCUMENT_ARCHIVED: '□',
@@ -88,6 +94,14 @@ function render() {
   elements.waiting.textContent = metrics.waiting;
   elements.success.textContent = `${metrics.successRate}%`;
   elements.provider.textContent = provider;
+  elements.policies.innerHTML = (state.data.policies || []).map((policy) => `
+    <div class="policy-row">
+      <strong>${escapeHtml(policy.name)}</strong>
+      <code>${escapeHtml(policy.documentType)}</code>
+      <span>${escapeHtml(policy.companyCode)}</span>
+      <span>${escapeHtml(policy.signatureLevel)}</span>
+      <span>${escapeHtml(policy.archiveTarget)}</span>
+    </div>`).join('');
 
   if (!state.selectedId && jobs.length) state.selectedId = jobs[0].id;
   if (state.selectedId && !jobs.some((job) => job.id === state.selectedId)) state.selectedId = jobs[0]?.id || null;
@@ -186,7 +200,7 @@ async function simulateApproval() {
     state.selectedId = result.job.id;
     await refresh();
     showToast('SAP onayı doğrulandı; imza talebi otomatik oluşturuldu.');
-    document.querySelector('.workspace').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.querySelector('#queue').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
     showToast(error.message, 'error');
   } finally {
@@ -230,6 +244,10 @@ elements.consent.addEventListener('change', () => { elements.complete.disabled =
 elements.complete.addEventListener('click', completeSignature);
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !elements.modal.hidden) closeSignModal(); });
 
-refresh({ silent: false });
+Promise.all([refresh({ silent: false }), request('/api/runtime')]).then(([, runtime]) => {
+  elements.gatewayName.textContent = runtime.gatewayName;
+  elements.sapSystem.textContent = runtime.sapSystem;
+  elements.providerName.textContent = runtime.provider;
+  elements.databaseMode.textContent = `${runtime.database} · ${runtime.environment}`;
+}).catch((error) => showToast(error.message, 'error'));
 window.setInterval(() => { if (elements.modal.hidden) refresh(); }, 5000);
-

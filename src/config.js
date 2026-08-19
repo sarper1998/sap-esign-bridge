@@ -7,7 +7,13 @@ export function loadConfig(env = process.env) {
   return {
     port: Number(env.PORT || 8787),
     baseUrl: env.BASE_URL || `http://localhost:${env.PORT || 8787}`,
+    gatewayName: env.GATEWAY_NAME || 'SignBridge Production',
+    environment: env.DEPLOYMENT_ENV || 'self-hosted',
+    databaseUrl: env.DATABASE_URL || '',
+    seedDemo: env.SEED_DEMO !== 'false',
+    adminToken: env.ADMIN_TOKEN || '',
     provider,
+    sapSystemName: env.SAP_SYSTEM_NAME || 'SAP S/4HANA',
     sapWebhookSecret: env.SAP_WEBHOOK_SECRET || 'demo-sap-secret',
     sapUpdateUrl: env.SAP_UPDATE_URL || '',
     sapUpdateToken: env.SAP_UPDATE_TOKEN || '',

@@ -1,30 +1,19 @@
-# LinkedIn paylaşım metni
+SAP’te onay tamamlanıyor; ama e‑imza süreci hâlâ PDF indir–yükle–e‑posta gönder–SAP’ye geri ekle döngüsünde kalabiliyor.
 
-SAP onayı tamamlandıktan sonra e‑imza sürecinin hâlâ e‑posta, dosya indirme ve manuel takip ile ilerlemesi gerekmiyor.
+Bu problemi ürün gibi ele alıp SignBridge’i güncelledim: SAP onay olaylarını kurumun seçtiği e‑imza sağlayıcısına bağlayan self-hosted bir orkestrasyon gateway’i.
 
-Bu fikirden yola çıkarak **SignBridge** adını verdiğim bir entegrasyon MVP’si geliştirdim.
+Yeni sürümde:
+• Docker + PostgreSQL ile kurum içinde kurulum
+• SAP Event Mesh / Integration Suite entegrasyon yolu
+• HMAC doğrulama ve event idempotency
+• Belge/şirket bazlı imza politikaları
+• Kalıcı kuyruk, retry ve audit trail
+• SAP callback akışı ve yönetim konsolu
 
-Akış basit:
+Özel anahtar veya PIN gateway’e girmez; SignBridge yalnızca doğrulanmış süreci taşır.
 
-✅ SAP’te onay tamamlanır  
-✅ Olay güvenli webhook ile doğrulanır  
-✅ E‑imza talebi otomatik oluşturulur  
-✅ İmza, kullanıcının güvenli sağlayıcı ekranında tamamlanır  
-✅ İmzalı belge ve denetim izi yeniden SAP’ye işlenir
+Article’da mimari kararları anlattım. S/4HANA Cloud ve on‑prem için ayrıntılı kurulum tutorialı, iFlow adımları, örnek payload ve go‑live checklist doğrudan repoda:
 
-Buradaki en önemli tasarım kararı: Sistem e‑imza PIN’ini veya özel anahtarı tutmuyor. Otomatikleştirilen şey kişinin imzası değil; **onaydan imzaya giden güvenli süreç**.
+https://github.com/sarper1998/sap-esign-bridge
 
-MVP’de HMAC webhook doğrulaması, idempotency, belge hash takibi, sağlayıcı adaptörü, SAP geri bildirimi ve uçtan uca demo paneli bulunuyor. Açık kaynak tarafta Documenso/LibreSign iş akışlarını ve EU DSS’in PAdES doğrulama kabiliyetlerini değerlendirdim.
-
-Bir sonraki adım: SAP Integration Suite + gerçek bir uzaktan e‑imza sağlayıcısı ile pilot entegrasyon.
-
-SAP onay süreçlerinde sizce en çok zaman kaybettiren adım hangisi?
-
-#SAP #S4HANA #DigitalSignature #Eİmza #Integration #Automation #EnterpriseArchitecture #OpenSource #SoftwareDevelopment
-
----
-
-## Kısa görsel başlığı
-
-**Onay bittiği anda, imza süreci başlar.**  
-SAP × E‑İmza · Güvenli, izlenebilir, sağlayıcıdan bağımsız.
+#SAP #S4HANA #ElectronicSignature #IntegrationSuite #EventDrivenArchitecture #OpenSource

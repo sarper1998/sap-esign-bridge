@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: SignBridge API
-  version: 1.0.0
-  description: SAP onaylari ile e-imza saglayicilari arasindaki entegrasyon API'si.
+  version: 1.1.0
+  description: Self-hosted SAP onay ve e-imza orkestrasyon gateway API'si.
 servers:
   - url: http://localhost:8787
 paths:
@@ -11,11 +11,37 @@ paths:
       summary: Servis saglik kontrolu
       responses:
         "200": { description: Servis calisiyor }
+  /api/ready:
+    get:
+      summary: Veritabani dahil readiness kontrolu
+      responses:
+        "200": { description: Gateway trafik almaya hazir }
+  /api/runtime:
+    get:
+      summary: Secret icermeyen deployment ve baglanti bilgileri
+      responses:
+        "200": { description: Runtime metadatasi }
   /api/state:
     get:
       summary: Demo panel durumu
       responses:
         "200": { description: Metrikler ve surecler }
+  /api/jobs/{jobId}/retry-sap:
+    post:
+      summary: Basarisiz SAP callback'ini yeniden dener
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema: { type: string }
+        - in: header
+          name: Authorization
+          required: false
+          schema: { type: string, example: "Bearer <ADMIN_TOKEN>" }
+      responses:
+        "200": { description: SAP aktarimi tamamlandi }
+        "401": { description: Yonetici yetkilendirmesi gerekli }
+        "422": { description: Is yeniden denenebilir durumda degil }
   /api/webhooks/sap/approval:
     post:
       summary: SAP onay olayini kabul eder
@@ -54,6 +80,7 @@ components:
         eventId: { type: string }
         approvalId: { type: string }
         system: { type: string }
+        companyCode: { type: string }
         status: { type: string, const: APPROVED }
         approvedAt: { type: string, format: date-time }
         document:
@@ -62,6 +89,7 @@ components:
           properties:
             id: { type: string }
             title: { type: string }
+            type: { type: string, example: CONTRACT }
             hash: { type: string }
             url: { type: string, format: uri }
         signer:

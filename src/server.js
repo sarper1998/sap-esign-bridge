@@ -9,6 +9,8 @@ import { DemoSignatureProvider } from './providers/demo-provider.js';
 import { DocumensoProvider } from './providers/documenso-provider.js';
 import { SapClient } from './sap-client.js';
 import { SapESignWorkflow } from './core/workflow.js';
+import { MemoryRepository } from './repositories/memory-repository.js';
+import { PostgresRepository } from './repositories/postgres-repository.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -55,8 +57,12 @@ export function buildRuntime(overrides = {}) {
     updateUrl: config.sapUpdateUrl,
     token: config.sapUpdateToken,
   });
-  const workflow = overrides.workflow || new SapESignWorkflow({ provider, sapClient });
-  return { config, provider, sapClient, workflow };
+  const repository = overrides.repository || (config.databaseUrl
+    ? new PostgresRepository({ connectionString: config.databaseUrl })
+    : new MemoryRepository());
+  const workflow = overrides.workflow || new SapESignWorkflow({ provider, sapClient, repository });
+  const ready = workflow.initialize({ seedDemo: config.seedDemo });
+  return { config, provider, sapClient, repository, workflow, ready };
 }
 
 export function createServer(overrides = {}) {
@@ -68,6 +74,7 @@ export function createServer(overrides = {}) {
     const route = requestUrl.pathname;
 
     try {
+      await runtime.ready;
       if (request.method === 'GET' && route === '/') return serveFile(response, 'index.html', 'text/html; charset=utf-8');
       if (request.method === 'GET' && route === '/styles.css') return serveFile(response, 'styles.css', 'text/css; charset=utf-8');
       if (request.method === 'GET' && route === '/app.js') return serveFile(response, 'app.js', 'text/javascript; charset=utf-8');
@@ -75,17 +82,37 @@ export function createServer(overrides = {}) {
       if (request.method === 'GET' && route === '/api/health') {
         return json(response, 200, {
           status: 'ok',
-          service: 'sap-esign-bridge',
+          service: 'signbridge-gateway',
+          version: '1.1.0',
+          environment: config.environment,
           provider: config.provider,
           time: new Date().toISOString(),
         });
       }
+      if (request.method === 'GET' && route === '/api/ready') {
+        await runtime.repository.ping();
+        return json(response, 200, { status: 'ready', database: config.databaseUrl ? 'postgresql' : 'memory' });
+      }
+      if (request.method === 'GET' && route === '/api/runtime') {
+        return json(response, 200, {
+          gatewayName: config.gatewayName,
+          environment: config.environment,
+          database: config.databaseUrl ? 'PostgreSQL' : 'Memory / demo',
+          sapSystem: config.sapSystemName,
+          provider: runtime.provider.name,
+          connections: [
+            { id: 'sap', name: config.sapSystemName, type: 'SAP', status: 'connected' },
+            { id: 'signature', name: runtime.provider.name, type: 'E-İmza', status: 'connected' },
+          ],
+        });
+      }
       if (request.method === 'GET' && route === '/api/state') {
-        return json(response, 200, workflow.getState());
+        return json(response, 200, await workflow.getState());
       }
       if (request.method === 'POST' && route === '/api/demo/reset') {
-        workflow.resetDemo();
-        return json(response, 200, workflow.getState());
+        if (!config.seedDemo) return json(response, 403, { error: 'Demo uçları bu kurulumda kapalıdır.' });
+        await workflow.resetDemo();
+        return json(response, 200, await workflow.getState());
       }
       if (request.method === 'POST' && route === '/api/demo/approve') {
         const payload = workflow.createDemoApproval();
@@ -97,6 +124,15 @@ export function createServer(overrides = {}) {
       if (request.method === 'POST' && completeMatch) {
         if (config.provider !== 'demo') return json(response, 403, { error: 'Bu endpoint yalnizca demo modunda aciktir.' });
         const result = await workflow.completeSignature(decodeURIComponent(completeMatch[1]));
+        return json(response, 200, result);
+      }
+
+      const retryMatch = route.match(/^\/api\/jobs\/([^/]+)\/retry-sap$/);
+      if (request.method === 'POST' && retryMatch) {
+        if (config.adminToken && !secureEqual(request.headers.authorization, `Bearer ${config.adminToken}`)) {
+          return json(response, 401, { error: 'Yönetici yetkilendirmesi gerekli.' });
+        }
+        const result = await workflow.retrySapUpdate(decodeURIComponent(retryMatch[1]));
         return json(response, 200, result);
       }
 
@@ -140,8 +176,14 @@ loadLocalEnv(path.join(root, '.env'));
 const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 if (isMain) {
   const { server, runtime } = createServer();
-  server.listen(runtime.config.port, '0.0.0.0', () => {
-    console.log(`SignBridge calisiyor: ${runtime.config.baseUrl}`);
-    console.log(`Imza saglayicisi: ${runtime.provider.name}`);
+  runtime.ready.then(() => {
+    server.listen(runtime.config.port, '0.0.0.0', () => {
+      console.log(`SignBridge Gateway çalışıyor: ${runtime.config.baseUrl}`);
+      console.log(`İmza sağlayıcısı: ${runtime.provider.name}`);
+      console.log(`Veri deposu: ${runtime.config.databaseUrl ? 'PostgreSQL' : 'Memory / demo'}`);
+    });
+  }).catch((error) => {
+    console.error(`SignBridge başlatılamadı: ${error.message}`);
+    process.exitCode = 1;
   });
 }

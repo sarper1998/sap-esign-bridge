@@ -1,130 +1,81 @@
-# Onay Bittiği Anda İmza Süreci Başlar: SAP ve E‑İmza Arasında SignBridge
+# SAP Onaylarını E‑İmzaya Bağlayan Self‑Hosted Gateway: SignBridge
 
-Kurumsal onay süreçlerinde ilginç bir paradoks var: Belge SAP içinde dijital olarak hazırlanıyor, kontrol ediliyor ve onaylanıyor; fakat sıra imzaya geldiğinde süreç çoğu zaman e-posta, dosya indirme, manuel yükleme ve durum takibine geri dönüyor.
+Bir satın alma sözleşmesi SAP’te onaylandı.
 
-Bu kopukluk yalnızca zaman kaybettirmiyor. Aynı zamanda yanlış belgenin imzalanması, onayın iki kez işlenmesi, imzalı dosyanın doğru SAP kaydıyla eşleşmemesi ve denetim izinin farklı sistemlere dağılması gibi riskler doğuruyor.
+Peki sonra ne oluyor?
 
-Bu problemden yola çıkarak SignBridge adını verdiğim açık kaynak bir entegrasyon MVP’si geliştirdim.
+Birçok kurumda cevap hâlâ şu: PDF indirilir, e‑posta atılır, imza portalına tekrar yüklenir, sonuç beklenir ve imzalı dosya SAP’ye elle eklenir. Onay dijitaldir; ama onay ile imza arasındaki son kilometre değildir.
 
-SignBridge’in amacı basit: SAP’te onay tamamlandığı anda güvenli e‑imza sürecini otomatik başlatmak ve imza sonucunu yeniden SAP’ye işlemek.
+SignBridge’i bu boşluk için ürünleştirdim: kurumun kendi ortamında çalışan, SAP onay olaylarını seçilen e‑imza sağlayıcısına bağlayan self-hosted bir orkestrasyon gateway’i.
 
-## Otomatikleştirilen şey imza değil, güvenli süreç
+## İmza uygulaması değil, kontrol düzlemi
 
-Bu projedeki en önemli tasarım kararı burada başlıyor.
+SignBridge sertifika üretmez, kullanıcının özel anahtarını saklamaz ve PIN istemez. Görevi süreç taşımaktır:
 
-Kişisel e‑imzayı kullanıcının iradesi veya güvenli doğrulama adımı olmadan “arka planda” atmak doğru bir yaklaşım değil. SignBridge özel anahtar, sertifika PIN’i veya imza oluşturma verisi saklamıyor. Bu bilgiler entegrasyon katmanına hiçbir zaman gelmiyor.
+1. SAP’ten gelen APPROVED olayını HMAC ile doğrular.
+2. Aynı eventId’nin ikinci kez imza talebi oluşturmasını engeller.
+3. Belge türü ve şirket koduna göre imza politikasını seçer.
+4. Belgeyi sağlayıcı adaptörü üzerinden imzaya gönderir.
+5. Tamamlanma webhook’unu alır.
+6. İmzalı belgeyi ve denetim izini SAP’ye geri işler.
 
-Otomatikleştirilen akış şu şekilde:
+Böylece SAP iş akışının sahibi olmaya devam eder; e‑imza sağlayıcısı güvenli imza oturumunu yürütür; SignBridge ise ikisi arasındaki doğrulanabilir ve izlenebilir bağlantıyı kurar.
 
-1. SAP iş akışındaki onay tamamlanıyor.
-2. SAP, imzalı ve doğrulanabilir bir olay gönderiyor.
-3. SignBridge olayın gerçekten SAP’den geldiğini kontrol ediyor.
-4. Belgenin SHA‑256 özeti ve imzacı bilgileri doğrulanıyor.
-5. Yetkili imza sağlayıcısında güvenli imza oturumu açılıyor.
-6. Kullanıcı imzayı sağlayıcının ekranında tamamlıyor.
-7. İmzalı belge ve denetim izi SAP’ye geri işleniyor.
+## Neden self-hosted?
 
-Böylece kullanıcının imza iradesi korunurken, onay ile imza arasındaki manuel operasyon ortadan kalkıyor.
+Kurumsal entegrasyonda mesele yalnızca “bir API çağrısı yapmak” değil. Ağ sınırı, belge erişimi, secret yönetimi, log saklama, veri yerleşimi ve operasyonel sorumluluk en az kod kadar önemli.
 
-## Mimari yaklaşım
+Yeni sürüm bu nedenle Docker Compose ve PostgreSQL ile kurum içinde çalışacak şekilde tasarlandı. Yönetim konsolunda bağlantılar, politikalar, işlem kuyruğu ve audit trail tek görünümde izlenebiliyor. Health/readiness endpoint’leri, kalıcı retry bilgisi ve container healthcheck’i de deployment’ın parçası.
 
-SignBridge’i SAP’nin içine gömülü bir imza kütüphanesi olarak değil, bağımsız bir integration service olarak tasarladım.
+## SAP tarafındaki önerilen akış
 
-Akışın bileşenleri:
+Referans mimari şu:
 
-SAP S/4HANA → Event/Webhook → SignBridge → E‑İmza Sağlayıcısı → Callback → SAP
+SAP S/4HANA → Event Mesh → Integration Suite iFlow → SignBridge → E‑İmza Sağlayıcısı
 
-Bu ayrım birkaç önemli avantaj sağlıyor:
+İmza tamamlandığında dönüş yolu:
 
-• SAP tarafında yalnızca tek bir entegrasyon sözleşmesi kalıyor.
-• İmza sağlayıcısı değiştiğinde SAP geliştirmesi yeniden yapılmıyor.
-• Güvenlik politikaları merkezi olarak uygulanabiliyor.
-• Her onay ve imza adımı tek bir denetim izinde görülebiliyor.
-• Hata ve tekrar deneme politikaları SAP iş akışından bağımsız yönetilebiliyor.
+E‑İmza Sağlayıcısı → SignBridge → Integration Suite → SAP iş nesnesi / DMS
 
-MVP, bağımlılıksız bir Node.js servisi olarak çalışıyor. Sağlayıcı katmanı adaptör yapısında. Demo sağlayıcısının yanında Documenso v2 API’si için çalışan bir adaptör de bulunuyor.
+Event Mesh olay üreticisiyle tüketiciyi ayrıştırıyor. Integration Suite iFlow ise SAP’nin business event payload’ını SignBridge’in canonical formatına çeviriyor, HMAC header’ını üretiyor ve HTTPS çağrısını yapıyor. On-prem kurulumlarda Cloud Connector ve senaryoya göre HTTP/OData veya RFC adapter devreye girebilir.
 
-## Güvenlikte özellikle ele aldığım noktalar
+Communication Arrangement adı ve iş nesnesinin event/API seçimi S/4HANA release’ine göre değişebileceği için bunları kodun içine sabitlemedim. Repo içindeki tutorial hem S/4HANA Cloud hem on-prem yolunu, iFlow adımlarını, örnek payload’ı, callback tasarımını ve go-live kontrol listesini içeriyor.
 
-Bir entegrasyonun çalışması tek başına yeterli değil; yanlış veya tekrarlanan bir olayı güvenli şekilde reddedebilmesi de gerekiyor.
+Detaylı SAP kurulum tutorialı:
+https://github.com/sarper1998/sap-esign-bridge/blob/main/docs/SAP_INSTALLATION_TUTORIAL_TR.md
 
-Bu nedenle MVP’de şu kontroller var:
+## Güvenlikte bilinçli sınırlar
 
-HMAC webhook doğrulaması
+SignBridge’in güvenlik modeli dört temel karara dayanıyor:
 
-SAP’ten gelen ham istek gövdesi SHA‑256 HMAC ile doğrulanıyor. İmzası uyuşmayan olaylar işlenmiyor.
+- HMAC: SAP/iFlow’dan gelen body’nin değişmediğini doğrulamak.
+- Idempotency: Event Mesh veya iFlow retry yapsa bile tek imza talebi oluşturmak.
+- SHA‑256: SAP’nin bildirdiği belge özetiyle indirilen PDF’nin bütünlüğünü karşılaştırmak.
+- Outbound allowlist: Gateway’in yalnızca izin verilen SAP/DMS hostlarından belge indirmesi.
 
-İdempotency
+İmza sahibi özel anahtarını ve PIN’ini gateway’e vermez. Gerçek imza işlemi seçilen sağlayıcının güvenli oturumunda kalır. İmza seviyesi, sağlayıcı ve saklama süresi ise belge türüne göre policy engine’de belirlenir.
 
-Her SAP onayının benzersiz bir eventId değeri var. Aynı olay tekrar gönderilse bile ikinci bir imza talebi oluşturulmuyor.
+## Açık kaynak, ama “tak‑çalıştır uygunluk” iddiası yok
 
-Belge bütünlüğü
+Repo çalışan bir reference implementation sunuyor: Node.js servis, PostgreSQL migration, Docker Compose, Documenso adaptörü, yönetim konsolu, testler ve OpenAPI sözleşmesi.
 
-SAP’in gönderdiği SHA‑256 değeri, imza sağlayıcısına aktarılacak gerçek PDF ile karşılaştırılıyor. Özet eşleşmezse süreç durduruluyor.
+Ancak her kurumun SAP iş nesnesi, onay modeli ve hukuki imza gereksinimi farklıdır. Satın alma sözleşmesiyle insan kaynakları belgesinin imza politikası aynı olmayabilir. Nitelikli e‑imza gerekip gerekmediği ülkeye ve belge türüne göre hukuk/bilgi güvenliği ekipleriyle değerlendirilmelidir.
 
-SSRF koruması
+## Neler var?
 
-Uzak belge yalnızca HTTPS üzerinden ve önceden tanımlanmış sunucu izin listesinden indirilebiliyor.
+- Self-hosted Docker/PostgreSQL deployment
+- SAP webhook doğrulama
+- Event idempotency
+- Policy-driven provider routing temeli
+- Documenso ve demo provider adaptörleri
+- Kalıcı processing queue ve audit trail
+- SAP callback ve retry akışı
+- Yönetim konsolu
+- CI, OpenAPI ve production checklist
 
-Sabit zamanlı secret karşılaştırması
-
-Webhook secret değerleri timing attack riskini azaltmak için sabit zamanlı karşılaştırmayla kontrol ediliyor.
-
-Denetim izi
-
-SAP onayının alınması, imza talebinin oluşturulması, imzanın tamamlanması, belgenin arşivlenmesi ve SAP güncellemesi ayrı olaylar olarak kaydediliyor.
-
-## Neden sağlayıcıdan bağımsız?
-
-E‑imza projelerinde belge iş akışı, kullanıcı deneyimi ve kriptografik doğrulama çoğu zaman tek bir ürün gibi değerlendiriliyor. Oysa bunlar farklı sorumluluklar.
-
-Araştırma sırasında üç açık kaynak proje özellikle öne çıktı:
-
-• Documenso: self-hosted belge imzalama deneyimi, alıcılar, imza alanları, API ve webhook yönetimi.
-• LibreSign: Nextcloud kullanan kurumlar için kontrollü belge imzalama akışları.
-• EU DSS: PAdES, XAdES, CAdES ve benzeri gelişmiş elektronik imza formatlarının üretimi ve doğrulanması.
-
-SignBridge bunlardan herhangi birini SAP’nin değişmez bir parçası haline getirmiyor. Sağlayıcı adaptörü değiştirilerek farklı bir uzaktan imza servisine veya Türkiye’de yetkilendirilmiş bir elektronik sertifika hizmet sağlayıcısının API’sine bağlanabilir.
-
-## Demo neleri gösteriyor?
-
-Hazırladığım web panelinde uçtan uca süreç simüle edilebiliyor:
-
-• SAP onayı oluşturuluyor.
-• İmza talebi otomatik açılıyor.
-• Belge özeti ve imza sahibi görüntüleniyor.
-• Güvenli imza adımı kullanıcı onayıyla tamamlanıyor.
-• Belge arşivleniyor.
-• SAP kaydı SIGNED durumuna getiriliyor.
-
-Panel aynı zamanda her belge için zaman sıralı denetim izini ve sistem metriklerini gösteriyor. Arayüz masaüstü ve mobil boyutlarda test edildi. Servis tarafında onay, idempotency, HMAC ve tamamlanma akışlarını kapsayan otomatik testler bulunuyor.
-
-## Üretime geçmeden önce
-
-Bu çalışma bir entegrasyon MVP’si. Gerçek bir kurumsal pilotta aşağıdaki katmanların eklenmesi gerekir:
-
-• SAP Integration Suite veya Event Mesh üzerinden güvenilir olay aktarımı
-• mTLS/OAuth2 ve kurumsal secret yönetimi
-• PostgreSQL veya SAP HANA tabanlı dayanıklı süreç deposu
-• Retry, exponential backoff ve dead-letter queue
-• İmzalı belgenin SAP DMS, ArchiveLink veya Content Server’a aktarılması
-• PAdES/XAdES validasyonu, sertifika zinciri, OCSP/CRL ve zaman damgası kontrolleri
-• KVKK, 5070 sayılı Elektronik İmza Kanunu ve kurumun imza politikası açısından hukuk/güvenlik değerlendirmesi
-
-Tam otomasyon gereken süreçlerde kişisel e‑imza ile kurumsal elektronik mühür/HSM senaryolarının da birbirinden ayrılması gerekiyor.
-
-## Açık kaynak repo
-
-Projenin kaynak kodunu, mimari notlarını, OpenAPI sözleşmesini, Documenso adaptörünü ve testlerini GitHub’da yayınladım:
-
+Kod ve kurulum dosyaları:
 https://github.com/sarper1998/sap-esign-bridge
 
-Projeyi inceleyenlerin özellikle şu konulardaki görüşlerini merak ediyorum:
+Benim için bu çalışmanın en değerli tarafı “SAP’ye bir imza butonu eklemek” değil. Onay, imza ve arşivleme arasındaki güven sınırını görünür, test edilebilir ve işletilebilir bir ürüne dönüştürmek.
 
-• SAP onayından sonra kurumunuzda en fazla manuel iş hangi adımda oluşuyor?
-• Uzaktan e‑imza entegrasyonunda en kritik gereksinim sizce kullanıcı deneyimi mi, denetim izi mi, sağlayıcı bağımsızlığı mı?
-• Bu yapıyı SAP Integration Suite üzerinde bir iFlow örneğiyle genişletmek faydalı olur mu?
-
-Onay bittiği anda imza süreci başlayabilir. Önemli olan imzayı değil, imzaya giden yolu doğru şekilde otomatikleştirmek.
-
-#SAP #S4HANA #Eİmza #DigitalSignature #Integration #Automation #EnterpriseArchitecture #OpenSource #NodeJS #SoftwareDevelopment
+SAP veya e‑imza entegrasyonlarıyla çalışanların görüşlerini merak ediyorum: Sizce production’a geçmeden önce en kritik kontrol noktası hangisi—event tasarımı, kimlik doğrulama, belge bütünlüğü, provider bağımsızlığı yoksa audit/uyumluluk mı?

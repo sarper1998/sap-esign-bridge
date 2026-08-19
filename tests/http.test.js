@@ -27,6 +27,9 @@ test('HTTP demo akisi uctan uca calisir', async (context) => {
   const health = await fetch(`${baseUrl}/api/health`).then((response) => response.json());
   assert.equal(health.status, 'ok');
 
+  const ready = await fetch(`${baseUrl}/api/ready`).then((response) => response.json());
+  assert.equal(ready.status, 'ready');
+
   const approvalResponse = await fetch(`${baseUrl}/api/demo/approve`, { method: 'POST' });
   assert.equal(approvalResponse.status, 201);
   const approval = await approvalResponse.json();

@@ -64,8 +64,19 @@ test('APPROVED olmayan SAP olayi reddedilir', async () => {
   const service = workflow();
   await assert.rejects(
     () => service.createFromApproval({ ...fixture(), status: 'REJECTED' }),
-    /Yalnizca APPROVED/,
+    /Yalnızca APPROVED/,
   );
+});
+
+test('belge turu ve sirket kodu imza politikasini belirler', async () => {
+  const service = workflow();
+  const result = await service.createFromApproval({
+    ...fixture(),
+    companyCode: '1000',
+    document: { ...fixture().document, type: 'CONTRACT' },
+  });
+  assert.equal(result.job.policy.id, 'POL-CONTRACT-TR');
+  assert.equal(result.job.policy.signatureLevel, 'QUALIFIED');
 });
 
 test('HMAC govde butunlugunu dogrular', () => {
