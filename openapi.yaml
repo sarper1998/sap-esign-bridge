@@ -1,0 +1,73 @@
+openapi: 3.1.0
+info:
+  title: SignBridge API
+  version: 1.0.0
+  description: SAP onaylari ile e-imza saglayicilari arasindaki entegrasyon API'si.
+servers:
+  - url: http://localhost:8787
+paths:
+  /api/health:
+    get:
+      summary: Servis saglik kontrolu
+      responses:
+        "200": { description: Servis calisiyor }
+  /api/state:
+    get:
+      summary: Demo panel durumu
+      responses:
+        "200": { description: Metrikler ve surecler }
+  /api/webhooks/sap/approval:
+    post:
+      summary: SAP onay olayini kabul eder
+      parameters:
+        - in: header
+          name: X-SAP-Signature
+          required: true
+          schema: { type: string, pattern: "^sha256=" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SapApproval" }
+      responses:
+        "202": { description: Imza talebi olusturuldu }
+        "200": { description: Tekrar gelen olay; mevcut surec dondu }
+        "401": { description: HMAC dogrulanamadi }
+        "422": { description: Politika veya sema hatasi }
+  /api/webhooks/documenso:
+    post:
+      summary: Documenso tamamlanma olayini kabul eder
+      parameters:
+        - in: header
+          name: X-Documenso-Secret
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Olay islendi veya guvenle yok sayildi }
+        "401": { description: Secret dogrulanamadi }
+components:
+  schemas:
+    SapApproval:
+      type: object
+      required: [eventId, approvalId, status, document, signer]
+      properties:
+        eventId: { type: string }
+        approvalId: { type: string }
+        system: { type: string }
+        status: { type: string, const: APPROVED }
+        approvedAt: { type: string, format: date-time }
+        document:
+          type: object
+          required: [id, title, hash, url]
+          properties:
+            id: { type: string }
+            title: { type: string }
+            hash: { type: string }
+            url: { type: string, format: uri }
+        signer:
+          type: object
+          required: [name, email]
+          properties:
+            name: { type: string }
+            email: { type: string, format: email }
+            department: { type: string }

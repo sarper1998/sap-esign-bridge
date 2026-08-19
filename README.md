@@ -119,4 +119,3 @@ Hazır metin: [docs/LINKEDIN_POST_TR.md](docs/LINKEDIN_POST_TR.md)
 ## Lisans
 
 SignBridge örnek kodu MIT lisanslıdır. Entegre edeceğiniz üçüncü taraf projelerin (ör. AGPL/LGPL) lisanslarını ayrıca inceleyin.
-
